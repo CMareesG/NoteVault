@@ -1,61 +1,71 @@
-import React, { createContext, useContext, useState } from "react";
-import { useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
 import api from "../services/api";
 import toast from "react-hot-toast";
 
 const ContextApi = createContext();
 
 export const ContextProvider = ({ children }) => {
-  //find the token in the localstorage
-  const getToken = localStorage.getItem("JWT_TOKEN")
-    ? JSON.stringify(localStorage.getItem("JWT_TOKEN"))
-    : null;
-  //find is the user status from the localstorage
-  const isADmin = localStorage.getItem("IS_ADMIN")
-    ? JSON.stringify(localStorage.getItem("IS_ADMIN"))
-    : false;
+  // Load token from localStorage
+  const initialToken = localStorage.getItem("JWT_TOKEN") || null;
 
-  //store the token
-  const [token, setToken] = useState(getToken);
-
-  //store the current loggedin user
+  const [token, setToken] = useState(initialToken);
   const [currentUser, setCurrentUser] = useState(null);
-  //handle sidebar opening and closing in the admin panel
   const [openSidebar, setOpenSidebar] = useState(true);
-  //check the loggedin user is admin or not
-  const [isAdmin, setIsAdmin] = useState(isADmin);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const fetchUser = async () => {
-    const user = JSON.parse(localStorage.getItem("USER"));
+    if (!token) return;
 
-    if (user?.username) {
-      try {
-        const { data } = await api.get(`/auth/user`);
-        const roles = data.roles;
+    try {
+      const { data } = await api.get("/auth/user"); // JWT auto-attached by api.js
+      setCurrentUser(data);
 
-        if (roles.includes("ROLE_ADMIN")) {
-          localStorage.setItem("IS_ADMIN", JSON.stringify(true));
-          setIsAdmin(true);
-        } else {
-          localStorage.removeItem("IS_ADMIN");
-          setIsAdmin(false);
-        }
-        setCurrentUser(data);
-      } catch (error) {
-        console.error("Error fetching current user", error);
-        toast.error("Error fetching current user");
+      if (data.roles?.includes("ROLE_ADMIN")) {
+        setIsAdmin(true);
+        localStorage.setItem("IS_ADMIN", "true");
+      } else {
+        setIsAdmin(false);
+        localStorage.removeItem("IS_ADMIN");
       }
+
+      // Optionally cache user in localStorage
+      localStorage.setItem("USER", JSON.stringify(data));
+    } catch (error) {
+      console.error("Error fetching current user", error);
+      toast.error("Error fetching current user");
+
+      // Token may be expired → clear state
+      handleLogout();
     }
   };
 
-  //if  token exist fetch the current user
   useEffect(() => {
     if (token) {
       fetchUser();
     }
   }, [token]);
 
-  //through context provider you are sending all the datas so that we access at anywhere in your application
+  const handleLogin = (jwt, userData) => {
+    localStorage.setItem("JWT_TOKEN", jwt);
+    localStorage.setItem("USER", JSON.stringify(userData));
+    setToken(jwt);
+    setCurrentUser(userData);
+
+    if (userData.roles?.includes("ROLE_ADMIN")) {
+      setIsAdmin(true);
+      localStorage.setItem("IS_ADMIN", "true");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("JWT_TOKEN");
+    localStorage.removeItem("USER");
+    localStorage.removeItem("IS_ADMIN");
+    setToken(null);
+    setCurrentUser(null);
+    setIsAdmin(false);
+  };
+
   return (
     <ContextApi.Provider
       value={{
@@ -67,6 +77,8 @@ export const ContextProvider = ({ children }) => {
         setOpenSidebar,
         isAdmin,
         setIsAdmin,
+        handleLogin,
+        handleLogout,
       }}
     >
       {children}
@@ -74,9 +86,4 @@ export const ContextProvider = ({ children }) => {
   );
 };
 
-//by using this (useMyContext) custom hook we can reach our context provier and access the datas across our components
-export const useMyContext = () => {
-  const context = useContext(ContextApi);
-
-  return context;
-};
+export const useMyContext = () => useContext(ContextApi);
